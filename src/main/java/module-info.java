@@ -3,6 +3,7 @@ module sn.isi.chat_messagerie {
     requires javafx.fxml;
     requires jakarta.persistence;
     requires static lombok;
+    requires jbcrypt;
 
 
     opens sn.isi.chat_messagerie to javafx.fxml;
