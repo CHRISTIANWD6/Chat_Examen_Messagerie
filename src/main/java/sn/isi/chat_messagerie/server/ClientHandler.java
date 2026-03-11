@@ -1,7 +1,7 @@
 package sn.isi.chat_messagerie.server;
 
-import com.association.messagerie.dao.MessageDAO;
-import com.association.messagerie.dao.UserDAO;
+import sn.isi.chat_messagerie.dao.MessageDAO;
+import sn.isi.chat_messagerie.dao.UserDAO;
 import  sn.isi.chat_messagerie.entity.Message;
 import  sn.isi.chat_messagerie.entity.User;
 
@@ -74,7 +74,8 @@ public class ClientHandler implements Runnable {
             case "LOGOUT"   -> handleLogout();
             case "SEND"     -> handleSend(parts);
             case "HISTORY"  -> handleHistory(parts);
-            case "LIST"     -> handleListUsers();
+            case "LIST"     -> handleListUsers();      // ORGANISATEUR uniquement (RG13)
+            case "MEMBERS"  -> handleMembers();        // Tous : liste des membres pour le chat
             default         -> send("ERROR|Commande inconnue : " + command);
         }
     }
@@ -150,6 +151,9 @@ public class ClientHandler implements Runnable {
 
         // Livraison des messages en attente (RG6)
         deliverPendingMessages();
+
+        // Envoyer automatiquement la liste des membres au client
+        handleMembers();
     }
 
     // -------------------------
@@ -228,6 +232,24 @@ public class ClientHandler implements Runnable {
     }
 
     // -------------------------
+    // MEMBERS — liste de tous les utilisateurs (accessible à tous)
+    // -------------------------
+
+    private void handleMembers() {
+        if (currentUser == null) { send("ERROR|Vous devez être connecté."); return; }
+
+        List<User> users = userDAO.findAll();
+        send("MEMBERS_START|" + users.size());
+        for (User u : users) {
+            // Exclure l'utilisateur lui-même de la liste
+            if (!u.getUsername().equals(currentUser.getUsername())) {
+                send("MEMBER|" + u.getUsername() + "|" + u.getStatus());
+            }
+        }
+        send("MEMBERS_END");
+    }
+
+    // -------------------------
     // LIST (RG13 : ORGANISATEUR uniquement)
     // -------------------------
 
@@ -286,3 +308,8 @@ public class ClientHandler implements Runnable {
         if (out != null) out.println(message);
     }
 }
+
+
+
+
+

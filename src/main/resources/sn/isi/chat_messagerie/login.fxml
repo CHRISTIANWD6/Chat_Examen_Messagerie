@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns:fx="http://javafx.com/fxml"
+      fx:controller="sn.isi.chat_messagerie.LoginController"
+      styleClass="root-login"
+      alignment="CENTER" spacing="0"
+      prefWidth="420" prefHeight="520">
+
+    <!-- En-tête -->
+    <VBox alignment="CENTER" spacing="6" styleClass="login-header">
+        <Label text="💬" styleClass="login-icon"/>
+        <Label text="Messagerie Association" styleClass="login-title"/>
+        <Label text="Connectez-vous ou créez un compte" styleClass="login-subtitle"/>
+    </VBox>
+
+    <!-- Onglets Login / Inscription -->
+    <TabPane fx:id="tabPane" styleClass="login-tabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="NEVER">
+
+        <!-- Onglet Connexion -->
+        <Tab text="Connexion">
+            <VBox spacing="14" styleClass="form-box">
+                <TextField fx:id="usernameField" promptText="Nom d'utilisateur" styleClass="input-field"/>
+                <PasswordField fx:id="passwordField" promptText="Mot de passe" styleClass="input-field"/>
+                <Button text="Se connecter" styleClass="btn-primary" maxWidth="Infinity"
+                        onAction="#handleLogin"/>
+            </VBox>
+        </Tab>
+
+        <!-- Onglet Inscription -->
+        <Tab text="Inscription" fx:id="registerTab">
+            <VBox spacing="14" styleClass="form-box">
+                <TextField fx:id="usernameRegField" promptText="Nom d'utilisateur" styleClass="input-field"/>
+                <PasswordField fx:id="passwordRegField" promptText="Mot de passe" styleClass="input-field"/>
+                <ComboBox fx:id="roleComboBox" styleClass="input-field" maxWidth="Infinity"
+                          promptText="Choisir un rôle"/>
+                <Button text="Créer un compte" styleClass="btn-secondary" maxWidth="Infinity"
+                        onAction="#handleRegister"/>
+            </VBox>
+        </Tab>
+
+    </TabPane>
+
+    <!-- Message de statut -->
+    <Label fx:id="statusLabel" styleClass="status-label" wrapText="true" maxWidth="Infinity"/>
+
+</VBox>
