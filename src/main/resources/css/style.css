@@ -170,6 +170,22 @@
     -fx-alignment: CENTER;
 }
 
+.btn-logout {
+    -fx-background-color: transparent;
+    -fx-text-fill: #ef4444;
+    -fx-border-color: #ef4444;
+    -fx-border-radius: 6px;
+    -fx-border-width: 1px;
+    -fx-background-radius: 6px;
+    -fx-font-size: 12px;
+    -fx-padding: 6 12;
+    -fx-cursor: hand;
+}
+
+.btn-logout:hover {
+    -fx-background-color: #ef444422;
+}
+
 /* =============================================
    ÉCRAN DE CHAT — TOPBAR
    ============================================= */
@@ -327,6 +343,22 @@
 
 .message-input:focused {
     -fx-border-color: #2563eb;
+}
+
+.btn-logout {
+    -fx-background-color: transparent;
+    -fx-text-fill: #ef4444;
+    -fx-border-color: #ef4444;
+    -fx-border-radius: 6px;
+    -fx-border-width: 1px;
+    -fx-background-radius: 6px;
+    -fx-font-size: 12px;
+    -fx-padding: 6 12;
+    -fx-cursor: hand;
+}
+
+.btn-logout:hover {
+    -fx-background-color: #ef444422;
 }
 
 /* =============================================

@@ -6,11 +6,14 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import java.util.logging.Logger;
 
 /**
  * Contrôleur de l'écran principal de chat.
  */
 public class ChatController {
+
+    private static final Logger logger = Logger.getLogger(ChatController.class.getName());
 
     @FXML private ListView<String> membersList;
     @FXML private VBox messagesBox;
@@ -97,6 +100,42 @@ public class ChatController {
     }
 
     // -------------------------
+    // Bouton Déconnexion
+    // -------------------------
+
+    @FXML
+    private void handleLogout() {
+        // Envoyer LOGOUT au serveur
+        conn.send("LOGOUT");
+
+        try {
+            // Charger la fenêtre de login
+            java.net.URL fxmlUrl = getClass().getResource("/sn/isi/chat_messagerie/fxml/Login.fxml");
+            if (fxmlUrl == null) fxmlUrl = getClass().getResource("/fxml/Login.fxml");
+
+            javafx.fxml.FXMLLoader loader = new javafx.fxml.FXMLLoader(fxmlUrl);
+            javafx.scene.Scene scene = new javafx.scene.Scene(loader.load(), 420, 520);
+
+            java.net.URL cssUrl = getClass().getResource("/sn/isi/chat_messagerie/css/style.css");
+            if (cssUrl == null) cssUrl = getClass().getResource("/css/style.css");
+            if (cssUrl != null) scene.getStylesheets().add(cssUrl.toExternalForm());
+
+            javafx.stage.Stage stage = new javafx.stage.Stage();
+            stage.setTitle("Messagerie — Association");
+            stage.setScene(scene);
+            stage.setResizable(false);
+            stage.show();
+
+            // Fermer la fenêtre de chat
+            ((javafx.stage.Stage) messageField.getScene().getWindow()).close();
+
+        } catch (Exception e) {
+            showStatus("❌ Erreur déconnexion : " + e.getMessage(), false);
+            e.printStackTrace();
+        }
+    }
+
+    // -------------------------
     // Bouton Lister les membres (RG13 — ORGANISATEUR)
     // -------------------------
 
@@ -117,6 +156,17 @@ public class ChatController {
         String type = parts[0];
 
         switch (type) {
+
+            case "OFFLINE" -> {
+                // RG10 : perte de connexion au serveur -> afficher erreur et bloquer l'UI
+                String msg = parts.length > 1 ? parts[1] : "Connexion perdue.";
+                connectedUserLabel.setText("🔴 Hors ligne");
+                connectedUserLabel.setStyle("-fx-text-fill: #ef4444;");
+                messageField.setDisable(true);
+                messageField.setPromptText("Connexion perdue — relancez l'application");
+                showStatus("❌ " + msg, false);
+                membersList.getItems().clear();
+            }
 
             case "MEMBERS_START" -> {
                 membersList.getItems().clear();

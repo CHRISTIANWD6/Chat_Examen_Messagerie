@@ -16,6 +16,8 @@
             <Label fx:id="connectedUserLabel" styleClass="topbar-user"/>
             <Button text="📋 Membres" fx:id="listMembersBtn"
                     styleClass="btn-outline" onAction="#handleListMembers"/>
+            <Button text="🚪 Déconnexion" styleClass="btn-logout"
+                    onAction="#handleLogout"/>
         </HBox>
     </top>
 
