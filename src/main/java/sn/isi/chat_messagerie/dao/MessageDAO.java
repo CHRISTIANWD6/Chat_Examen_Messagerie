@@ -9,9 +9,9 @@ import java.util.List;
 import java.util.logging.Logger;
 
 /**
- * DAO pour l'entité Message.
- * Fournit les opérations CRUD et les requêtes métier.
- */
+DAO pour l'entité Message.
+        * Fournit les opérations CRUD et les requêtes métier.
+        */
 public class MessageDAO {
 
     private static final Logger logger = Logger.getLogger(MessageDAO.class.getName());
@@ -65,9 +65,11 @@ public class MessageDAO {
         try {
             TypedQuery<Message> query = em.createQuery(
                     "SELECT m FROM Message m " +
+                            "JOIN FETCH m.sender " +
+                            "JOIN FETCH m.receiver " +
                             "WHERE (m.sender = :user1 AND m.receiver = :user2) " +
                             "   OR (m.sender = :user2 AND m.receiver = :user1) " +
-                            "ORDER BY m.dateEnvoi ASC", // RG8 : ordre chronologique
+                            "ORDER BY m.dateEnvoi ASC",
                     Message.class
             );
             query.setParameter("user1", user1);
@@ -87,6 +89,8 @@ public class MessageDAO {
         try {
             return em.createQuery(
                             "SELECT m FROM Message m " +
+                                    "JOIN FETCH m.sender " +
+                                    "JOIN FETCH m.receiver " +
                                     "WHERE m.receiver = :receiver AND m.statut = :statut " +
                                     "ORDER BY m.dateEnvoi ASC",
                             Message.class
