@@ -1,154 +1,219 @@
 package sn.isi.chat_messagerie;
 
-
 import sn.isi.chat_messagerie.client.ServerConnection;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.stage.Stage;
 
+import java.util.logging.Logger;
+
 /**
- * Contrôleur de l'écran de connexion / inscription.
+ * Contrôleur de la page de connexion / inscription.
+ * Après un login réussi, ouvre la fenêtre Chat et la passe le rôle.
  */
 public class LoginController {
 
-    // Champs onglet Connexion
-    @FXML private TextField usernameField;
-    @FXML private PasswordField passwordField;
+    private static final Logger logger = Logger.getLogger(LoginController.class.getName());
 
-    // Champs onglet Inscription (fx:id distincts pour éviter les conflits FXML)
-    @FXML private Tab registerTab;
-    @FXML private TextField usernameRegField;
+    // ── Onglet Connexion
+    @FXML private TextField     usernameField;
+    @FXML private PasswordField passwordField;
+    @FXML private Label         statusLabel;
+
+    // ── Onglet Inscription
+    @FXML private TextField     usernameRegField;
     @FXML private PasswordField passwordRegField;
     @FXML private ComboBox<String> roleComboBox;
+    @FXML private Label         statusRegLabel;
 
-    @FXML private Label statusLabel;
+    // ── TabPane (pour switcher d'onglet si besoin)
     @FXML private TabPane tabPane;
 
     private final ServerConnection conn = ServerConnection.getInstance();
 
+    // ── Rôle reçu du serveur lors du login
+    private String receivedRole = "MEMBRE";
+
+    // ================================================================
+    // FXML init — remplir la ComboBox des rôles
+    // ================================================================
+
     @FXML
     public void initialize() {
-        // Forcer le chargement de l'onglet Inscription pour que roleComboBox soit injecté
-        // JavaFX initialise les contrôles dans les Tab en lazy — on force le rendu
-        javafx.application.Platform.runLater(() -> {
-            tabPane.getSelectionModel().select(1); // Aller sur Inscription
-            tabPane.getSelectionModel().select(0); // Revenir sur Connexion
-
-            // Remplir les rôles maintenant que le Tab est rendu
+        Platform.runLater(() -> {
             if (roleComboBox != null) {
-                roleComboBox.getItems().addAll("MEMBRE", "BENEVOLE", "ORGANISATEUR");
-                roleComboBox.setValue("MEMBRE");
+                roleComboBox.getItems().setAll("MEMBRE", "BENEVOLE", "ORGANISATEUR");
+                roleComboBox.getSelectionModel().selectFirst();
             }
         });
-
-        // Connexion au serveur
-        if (!conn.isConnected()) {
-            boolean ok = conn.connect();
-            if (!ok) {
-                statusLabel.setText("❌ Impossible de joindre le serveur.");
-                statusLabel.setStyle("-fx-text-fill: #e74c3c;");
-            }
-        }
-
-        // Écoute des réponses du serveur
-        conn.setMessageListener(this::handleServerResponse);
     }
 
-    // -------------------------
-    // Bouton Connexion
-    // -------------------------
+    // ================================================================
+    // Connexion
+    // ================================================================
 
     @FXML
     private void handleLogin() {
         String username = usernameField.getText().trim();
-        String password = passwordField.getText().trim();
+        String password = passwordField.getText();
 
         if (username.isEmpty() || password.isEmpty()) {
-            showError("Veuillez remplir tous les champs.");
+            showError("Remplissez tous les champs.");
             return;
         }
 
-        conn.send("LOGIN|" + username + "|" + password);
+        try {
+            // (Re)connexion au serveur si nécessaire
+            conn.connect();
+
+            // Écouter la réponse du serveur
+            conn.setMessageListener(response -> {
+                Platform.runLater(() -> handleLoginResponse(response, username));
+            });
+
+            conn.send("LOGIN|" + username + "|" + password);
+
+        } catch (Exception e) {
+            showError("Connexion serveur impossible : " + e.getMessage());
+        }
     }
 
-    // -------------------------
-    // Bouton Inscription
-    // -------------------------
+    // Flag pour attendre OK puis ROLE avant d'ouvrir le chat
+    private boolean loginOkReceived = false;
+
+    private void handleLoginResponse(String response, String username) {
+        String[] parts = response.split("\\|", -1);
+        String   type  = parts[0];
+
+        switch (type) {
+            case "OK" -> {
+                loginOkReceived = true;
+                receivedRole = "MEMBRE"; // valeur par défaut si ROLE n'arrive pas
+                // On attend le message ROLE juste après, mais on ouvre quand même
+                logger.info("[RG12] Login OK : " + username);
+                // Petit délai pour laisser arriver le message ROLE
+                new Thread(() -> {
+                    try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+                    Platform.runLater(() -> openChatWindow(username, receivedRole));
+                }).start();
+            }
+            case "ROLE" -> {
+                // Reçu juste après OK — mettre à jour le rôle
+                receivedRole = parts.length > 1 ? parts[1] : "MEMBRE";
+                logger.info("[RG12] Rôle reçu : " + username + " = " + receivedRole);
+            }
+            case "ERROR" -> {
+                loginOkReceived = false;
+                String msg = parts.length > 1 ? parts[1] : "Identifiants incorrects.";
+                showError("❌ " + msg);
+            }
+        }
+    }
+
+    // ================================================================
+    // Inscription
+    // ================================================================
 
     @FXML
     private void handleRegister() {
         String username = usernameRegField.getText().trim();
-        String password = passwordRegField.getText().trim();
-        String role = roleComboBox.getValue();
+        String password = passwordRegField.getText();
+        String role     = roleComboBox.getValue();
 
-        if (username.isEmpty() || password.isEmpty()) {
-            showError("Veuillez remplir tous les champs.");
+        if (username.isEmpty() || password.isEmpty() || role == null) {
+            showRegError("Remplissez tous les champs.");
+            return;
+        }
+        if (password.length() < 4) {
+            showRegError("Mot de passe trop court (min 4 caractères).");
             return;
         }
 
-        conn.send("REGISTER|" + username + "|" + password + "|" + role);
-    }
+        try {
+            conn.connect();
 
-    // -------------------------
-    // Traitement des réponses serveur
-    // -------------------------
+            conn.setMessageListener(response -> {
+                Platform.runLater(() -> {
+                    String[] parts = response.split("\\|", -1);
+                    if ("OK".equals(parts[0])) {
+                        showRegSuccess("✅ Compte créé ! Connectez-vous.");
+                    } else {
+                        String msg = parts.length > 1 ? parts[1] : "Erreur inscription.";
+                        showRegError("❌ " + msg);
+                    }
+                });
+            });
 
-    private void handleServerResponse(String response) {
-        String[] parts = response.split("\\|", -1);
-        String type = parts[0];
+            conn.send("REGISTER|" + username + "|" + password + "|" + role);
 
-        switch (type) {
-            case "OK" -> {
-                if (parts.length > 1 && parts[1].startsWith("Bienvenue")) {
-                    // Connexion réussie → ouvrir la fenêtre principale
-                    openChatWindow(usernameField.getText().trim());
-                } else {
-                    showSuccess(parts.length > 1 ? parts[1] : "Succès.");
-                }
-            }
-            case "ERROR" -> showError(parts.length > 1 ? parts[1] : "Erreur inconnue.");
+        } catch (Exception e) {
+            showRegError("Connexion serveur impossible : " + e.getMessage());
         }
     }
 
-    // -------------------------
-    // Ouverture de la fenêtre de chat
-    // -------------------------
+    // ================================================================
+    // Ouvrir la fenêtre Chat avec le rôle
+    // ================================================================
 
-    private void openChatWindow(String username) {
+    private void openChatWindow(String username, String role) {
         try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/sn/isi/chat_messagerie/hello-view.fxml"));
-            Scene scene = new Scene(loader.load(), 900, 620);
-            scene.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
+            java.net.URL fxmlUrl = getClass().getResource("/sn/isi/chat_messagerie/hello-view.fxml");
+            if (fxmlUrl == null) fxmlUrl = getClass().getResource("/fxml/Chat.fxml");
+            if (fxmlUrl == null) {
+                showError("Chat.fxml introuvable.");
+                return;
+            }
+
+            FXMLLoader loader = new FXMLLoader(fxmlUrl);
+            Scene      scene  = new Scene(loader.load(), 960, 640);
+
+            java.net.URL cssUrl = getClass().getResource("/sn/isi/chat_messagerie/css/style.css");
+            if (cssUrl == null) cssUrl = getClass().getResource("/css/style.css");
+            if (cssUrl != null) scene.getStylesheets().add(cssUrl.toExternalForm());
 
             ChatController chatController = loader.getController();
-            chatController.init(username);
+            chatController.init(username, role);   // ← passage du rôle
 
-            Stage stage = new Stage();
-            stage.setTitle("Messagerie — " + username);
-            stage.setScene(scene);
-            stage.setOnCloseRequest(e -> conn.disconnect());
-            stage.show();
+            Stage chatStage = new Stage();
+            chatStage.setTitle("Messagerie — " + username + " (" + role + ")");
+            chatStage.setScene(scene);
+            chatStage.setOnCloseRequest(e -> conn.disconnect());
+            chatStage.show();
 
-            // Fermer la fenêtre de login
+            // Fermer la fenêtre de connexion
             ((Stage) usernameField.getScene().getWindow()).close();
+
         } catch (Exception e) {
-            showError("Erreur ouverture chat : " + e.getMessage());
+            showError("Erreur : " + e.getClass().getSimpleName() + " — " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    // -------------------------
-    // Utilitaires UI
-    // -------------------------
+    // ================================================================
+    // Helpers UI
+    // ================================================================
 
     private void showError(String msg) {
-        statusLabel.setText("❌ " + msg);
-        statusLabel.setStyle("-fx-text-fill: #e74c3c;");
+        if (statusLabel != null) {
+            statusLabel.setText(msg);
+            statusLabel.setStyle("-fx-text-fill: #ef4444;");
+        }
     }
 
-    private void showSuccess(String msg) {
-        statusLabel.setText("✅ " + msg);
-        statusLabel.setStyle("-fx-text-fill: #27ae60;");
+    private void showRegError(String msg) {
+        if (statusRegLabel != null) {
+            statusRegLabel.setText(msg);
+            statusRegLabel.setStyle("-fx-text-fill: #ef4444;");
+        }
+    }
+
+    private void showRegSuccess(String msg) {
+        if (statusRegLabel != null) {
+            statusRegLabel.setText(msg);
+            statusRegLabel.setStyle("-fx-text-fill: #22c55e;");
+        }
     }
 }

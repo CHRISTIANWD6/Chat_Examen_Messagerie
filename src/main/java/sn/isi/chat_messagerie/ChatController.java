@@ -1,299 +1,389 @@
 package sn.isi.chat_messagerie;
 
 import sn.isi.chat_messagerie.client.ServerConnection;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.*;
+import javafx.stage.Stage;
+
 import java.util.logging.Logger;
 
 /**
- * Contrôleur de l'écran principal de chat.
+ * Droits par rôle :
+ *  ORGANISATEUR → LIST (tous les membres inscrits, RG13) + chat 1:1 avec tous
+ *  MEMBRE       → MEMBERS (membres + organisateurs) + chat 1:1
+ *  BENEVOLE     → pas de contacts, pas de chat 1:1, groupes uniquement
  */
 public class ChatController {
 
     private static final Logger logger = Logger.getLogger(ChatController.class.getName());
 
-    @FXML private ListView<String> membersList;
-    @FXML private VBox messagesBox;
-    @FXML private ScrollPane messagesScrollPane;
-    @FXML private TextField messageField;
-    @FXML private Label currentChatLabel;
-    @FXML private Label connectedUserLabel;
-    @FXML private Label statusLabel;
-    @FXML private Button listMembersBtn; // Visible uniquement pour ORGANISATEUR
+    // ── TopBar
+    @FXML private Label  connectedUserLabel;
+    @FXML private Label  roleLabel;
+    @FXML private Button listAllBtn;
 
-    private String currentUsername;
-    private String selectedReceiver;
+    // ── Sidebar
+    @FXML private Label            sidebarTitle;
+    @FXML private ListView<String> membersList;
+    @FXML private Label            sidebarInfo;
+
+    // ── Zone chat
+    @FXML private Label      currentChatLabel;
+    @FXML private ScrollPane messagesScrollPane;
+    @FXML private VBox       messagesBox;
+    @FXML private Label      statusLabel;
+    @FXML private TextField  messageField;
+    @FXML private Button     sendBtn;
+
+    // ── État
+    private String  currentUsername;
+    private String  currentRole;
+    private String  selectedReceiver;
+    private boolean inHistoryMode = false;
+    private boolean inListMode    = false;
 
     private final ServerConnection conn = ServerConnection.getInstance();
 
-    // -------------------------
-    // Initialisation avec le nom d'utilisateur
-    // -------------------------
+    // ================================================================
+    // init() — appelé depuis LoginController
+    // ================================================================
 
-    public void init(String username) {
+    public void init(String username, String role) {
         this.currentUsername = username;
+        this.currentRole     = role;
+
+        conn.setMessageListener(msg -> Platform.runLater(() -> handleServerResponse(msg)));
+
         connectedUserLabel.setText("👤 " + username);
+        roleLabel.setText(role);
+        styleRoleLabel(role);
+        applyRoleRestrictions(role);
 
-        // Écoute des messages entrants
-        conn.setMessageListener(this::handleServerResponse);
-
-        // Masquer le bouton LIST par défaut (RG13)
-        listMembersBtn.setVisible(false);
-
-        // Demander la liste des membres au serveur
-        conn.send("MEMBERS");
+        // Charger les contacts selon le rôle
+        if ("ORGANISATEUR".equals(role)) {
+            conn.send("LIST");          // RG13 : liste complète
+        } else if ("MEMBRE".equals(role)) {
+            conn.send("MEMBERS");       // membres + organisateurs
+        }
+        // BENEVOLE : rien à charger
     }
 
-    // -------------------------
-    // Sélection d'un membre dans la liste
-    // -------------------------
+    public void init(String username) {
+        init(username, "MEMBRE");
+    }
+
+    // ================================================================
+    // Adapter l'interface selon le rôle
+    // ================================================================
+
+    private void applyRoleRestrictions(String role) {
+        switch (role) {
+
+            case "ORGANISATEUR" -> {
+                listAllBtn.setVisible(true);
+                listAllBtn.setManaged(true);
+                sidebarTitle.setText("Tous les membres inscrits");
+                sidebarInfo.setVisible(false);
+                sidebarInfo.setManaged(false);
+                membersList.setVisible(true);
+                membersList.setManaged(true);
+                messageField.setDisable(false);
+                messageField.setPromptText("Écrivez votre message...");
+                sendBtn.setDisable(false);
+                currentChatLabel.setText("📋 Liste complète des membres");
+            }
+
+            case "MEMBRE" -> {
+                listAllBtn.setVisible(false);
+                listAllBtn.setManaged(false);
+                sidebarTitle.setText("Membres & Organisateurs");
+                sidebarInfo.setVisible(false);
+                sidebarInfo.setManaged(false);
+                membersList.setVisible(true);
+                membersList.setManaged(true);
+                messageField.setDisable(false);
+                messageField.setPromptText("Écrivez votre message...");
+                sendBtn.setDisable(false);
+                currentChatLabel.setText("Sélectionnez un contact pour démarrer");
+            }
+
+            case "BENEVOLE" -> {
+                listAllBtn.setVisible(false);
+                listAllBtn.setManaged(false);
+                sidebarTitle.setText("Contacts");
+                sidebarInfo.setText("ℹ️ Les bénévoles n'ont pas de contacts directs.\nParticipez aux groupes.");
+                sidebarInfo.setVisible(true);
+                sidebarInfo.setManaged(true);
+                membersList.setVisible(false);
+                membersList.setManaged(false);
+                messageField.setDisable(true);
+                messageField.setPromptText("Chat 1:1 non disponible pour les bénévoles");
+                sendBtn.setDisable(true);
+                currentChatLabel.setText("Mode bénévole — groupes uniquement");
+            }
+        }
+    }
+
+    private void styleRoleLabel(String role) {
+        String color = switch (role) {
+            case "ORGANISATEUR" -> "#f59e0b";
+            case "MEMBRE"       -> "#3b82f6";
+            case "BENEVOLE"     -> "#6b7280";
+            default             -> "#ffffff";
+        };
+        roleLabel.setStyle("-fx-text-fill:" + color + ";-fx-font-size:11px;-fx-font-weight:bold;");
+    }
+
+    // ================================================================
+    // Sélection membre → historique (RG8)
+    // ================================================================
 
     @FXML
     private void handleSelectMember() {
+        if ("BENEVOLE".equals(currentRole)) return;
+
         String selected = membersList.getSelectionModel().getSelectedItem();
         if (selected == null) return;
 
-        // Nettoyer le préfixe de statut éventuel
-        selectedReceiver = selected.replace("🟢 ", "").replace("⚫ ", "").trim().split(" ")[0];
-        currentChatLabel.setText("Conversation avec : " + selectedReceiver);
-        messagesBox.getChildren().clear();
+        // Format : "🟢 username [ROLE]" → extraire username
+        String cleaned = selected
+                .replace("🟢 ", "").replace("⚫ ", "").trim();
+        selectedReceiver = cleaned.contains(" ") ? cleaned.split(" ")[0] : cleaned;
 
-        // Charger l'historique (RG8)
+        currentChatLabel.setText("💬 Conversation avec : " + selectedReceiver);
+        messagesBox.getChildren().clear();
         conn.send("HISTORY|" + selectedReceiver);
     }
 
-    // -------------------------
-    // Envoi d'un message
-    // -------------------------
+    // ================================================================
+    // Envoi de message — RG5, RG7
+    // ================================================================
 
     @FXML
     private void handleSendMessage() {
+        if ("BENEVOLE".equals(currentRole)) {
+            showStatus("❌ Les bénévoles ne peuvent pas envoyer de messages privés.", false);
+            return;
+        }
         if (selectedReceiver == null) {
             showStatus("❌ Sélectionnez un destinataire.", false);
             return;
         }
-
         String content = messageField.getText().trim();
         if (content.isEmpty()) return;
         if (content.length() > 1000) {
-            showStatus("❌ Message trop long (max 1000 caractères).", false);
+            showStatus("❌ Message trop long (max 1000 caractères). [RG7]", false);
             return;
         }
-
         conn.send("SEND|" + selectedReceiver + "|" + content);
-        addMessageBubble(content, true); // Afficher localement
+        addBubble(content, true);
         messageField.clear();
     }
 
-    // -------------------------
-    // Touche Entrée pour envoyer
-    // -------------------------
-
     @FXML
-    private void handleEnterKey(javafx.scene.input.KeyEvent event) {
-        if (event.getCode() == javafx.scene.input.KeyCode.ENTER) {
-            handleSendMessage();
-        }
+    private void handleEnterKey(KeyEvent e) {
+        if (e.getCode() == KeyCode.ENTER) handleSendMessage();
     }
 
-    // -------------------------
-    // Bouton Déconnexion
-    // -------------------------
+    // ================================================================
+    // Déconnexion → fermer chat et rouvrir la page de connexion
+    // ================================================================
 
     @FXML
     private void handleLogout() {
-        // Envoyer LOGOUT au serveur
         conn.send("LOGOUT");
+        conn.disconnect();
 
         try {
-            // Charger la fenêtre de login
             java.net.URL fxmlUrl = getClass().getResource("/sn/isi/chat_messagerie/fxml/Login.fxml");
             if (fxmlUrl == null) fxmlUrl = getClass().getResource("/fxml/Login.fxml");
+            if (fxmlUrl == null) {
+                showStatus("❌ Login.fxml introuvable.", false);
+                return;
+            }
 
-            javafx.fxml.FXMLLoader loader = new javafx.fxml.FXMLLoader(fxmlUrl);
-            javafx.scene.Scene scene = new javafx.scene.Scene(loader.load(), 420, 520);
+            FXMLLoader loader  = new FXMLLoader(fxmlUrl);
+            Scene      scene   = new Scene(loader.load(), 480, 560);
 
             java.net.URL cssUrl = getClass().getResource("/sn/isi/chat_messagerie/css/style.css");
             if (cssUrl == null) cssUrl = getClass().getResource("/css/style.css");
             if (cssUrl != null) scene.getStylesheets().add(cssUrl.toExternalForm());
 
-            javafx.stage.Stage stage = new javafx.stage.Stage();
-            stage.setTitle("Messagerie — Association");
-            stage.setScene(scene);
-            stage.setResizable(false);
-            stage.show();
+            Stage loginStage = new Stage();
+            loginStage.setTitle("Messagerie — Association");
+            loginStage.setScene(scene);
+            loginStage.setResizable(false);
+            loginStage.show();
 
-            // Fermer la fenêtre de chat
-            ((javafx.stage.Stage) messageField.getScene().getWindow()).close();
+            logger.info("[RG12] Déconnexion : " + currentUsername + " → retour page connexion");
 
-        } catch (Exception e) {
-            showStatus("❌ Erreur déconnexion : " + e.getMessage(), false);
-            e.printStackTrace();
+            // Fermer la fenêtre chat
+            ((Stage) messageField.getScene().getWindow()).close();
+
+        } catch (Exception ex) {
+            showStatus("❌ Erreur retour connexion : " + ex.getMessage(), false);
+            ex.printStackTrace();
         }
     }
 
-    // -------------------------
-    // Bouton Lister les membres (RG13 — ORGANISATEUR)
-    // -------------------------
+    // ================================================================
+    // RG13 — Liste complète (bouton ORGANISATEUR)
+    // ================================================================
 
     @FXML
-    private void handleListMembers() {
+    private void handleListAll() {
+        if (!"ORGANISATEUR".equals(currentRole)) {
+            showStatus("❌ Accès réservé aux organisateurs.", false);
+            return;
+        }
+        membersList.getItems().clear();
+        currentChatLabel.setText("📋 Liste complète des membres inscrits");
+        inListMode = true;
         conn.send("LIST");
     }
 
-    // -------------------------
-    // Traitement des réponses du serveur
-    // -------------------------
-
-    private boolean inHistoryMode = false;
-    private boolean inListMode = false;
+    // ================================================================
+    // Traitement des réponses serveur
+    // ================================================================
 
     private void handleServerResponse(String response) {
         String[] parts = response.split("\\|", -1);
-        String type = parts[0];
+        String   type  = parts[0];
 
         switch (type) {
 
+            // RG10 — perte de connexion
             case "OFFLINE" -> {
-                // RG10 : perte de connexion au serveur -> afficher erreur et bloquer l'UI
                 String msg = parts.length > 1 ? parts[1] : "Connexion perdue.";
                 connectedUserLabel.setText("🔴 Hors ligne");
-                connectedUserLabel.setStyle("-fx-text-fill: #ef4444;");
+                connectedUserLabel.setStyle("-fx-text-fill:#ef4444;");
                 messageField.setDisable(true);
                 messageField.setPromptText("Connexion perdue — relancez l'application");
+                sendBtn.setDisable(true);
                 showStatus("❌ " + msg, false);
                 membersList.getItems().clear();
             }
 
-            case "MEMBERS_START" -> {
-                membersList.getItems().clear();
+            // Mise à jour du rôle
+            case "ROLE" -> {
+                String role = parts.length > 1 ? parts[1] : "MEMBRE";
+                this.currentRole = role;
+                roleLabel.setText(role);
+                styleRoleLabel(role);
+                applyRoleRestrictions(role);
             }
+
+            // Liste filtrée MEMBRES + ORGANISATEURS
+            case "MEMBERS_START" -> membersList.getItems().clear();
 
             case "MEMBER" -> {
                 String uname  = parts.length > 1 ? parts[1] : "?";
                 String status = parts.length > 2 ? parts[2] : "OFFLINE";
-                String icon   = status.equals("ONLINE") ? "🟢" : "⚫";
-                membersList.getItems().add(icon + " " + uname);
+                String mrole  = parts.length > 3 ? parts[3] : "";
+                String icon   = "ONLINE".equals(status) ? "🟢" : "⚫";
+                membersList.getItems().add(icon + " " + uname + " [" + mrole + "]");
             }
 
-            case "MEMBERS_END" -> {
-                // Liste chargée — rien à faire
+            case "MEMBERS_END" -> { /* fin liste */ }
+
+            // RG13 — liste complète (ORGANISATEUR)
+            case "LIST_START" -> {
+                inListMode = true;
+                membersList.getItems().clear();
+                String count = parts.length > 1 ? parts[1] : "?";
+                currentChatLabel.setText("📋 Liste complète — " + count + " membres inscrits");
             }
 
+            case "USER" -> {
+                if (!inListMode) break;
+                String uname   = parts.length > 1 ? parts[1] : "?";
+                String urole   = parts.length > 2 ? parts[2] : "";
+                String ustatus = parts.length > 3 ? parts[3] : "OFFLINE";
+                String icon    = "ONLINE".equals(ustatus) ? "🟢" : "⚫";
+                membersList.getItems().add(icon + " " + uname + " [" + urole + "]");
+            }
+
+            case "LIST_END" -> {
+                inListMode = false;
+                logger.info("[RG13] Liste complète chargée pour " + currentUsername);
+            }
+
+            // Messages 1:1
             case "MESSAGE" -> {
-                // Nouveau message entrant en temps réel
                 String sender  = parts.length > 1 ? parts[1] : "?";
                 String content = parts.length > 2 ? parts[2] : "";
                 if (sender.equals(selectedReceiver)) {
-                    addMessageBubble("[" + sender + "] " + content, false);
+                    addBubble(content, false);
                 } else {
                     showStatus("💬 Nouveau message de " + sender, true);
                 }
             }
 
+            // Historique RG8
             case "HISTORY_START" -> {
                 inHistoryMode = true;
                 messagesBox.getChildren().clear();
             }
 
             case "MSG" -> {
-                if (inHistoryMode) {
-                    String sender  = parts.length > 1 ? parts[1] : "?";
-                    String content = parts.length > 2 ? parts[2] : "";
-                    boolean isMe   = sender.equals(currentUsername);
-                    addMessageBubble(isMe ? content : "[" + sender + "] " + content, isMe);
-                }
+                if (!inHistoryMode) break;
+                String sender  = parts.length > 1 ? parts[1] : "?";
+                String content = parts.length > 2 ? parts[2] : "";
+                addBubble(content, sender.equals(currentUsername));
             }
 
             case "HISTORY_END" -> inHistoryMode = false;
 
-            case "LIST_START" -> {
-                inListMode = true;
-                membersList.getItems().clear();
+            // Messages en attente RG6
+            case "PENDING" -> {
+                String sender  = parts.length > 1 ? parts[1] : "?";
+                String content = parts.length > 2 ? parts[2] : "";
+                showStatus("📩 Message en attente de " + sender, true);
+                if (sender.equals(selectedReceiver)) addBubble(content, false);
             }
 
-            case "USER" -> {
-                if (inListMode) {
-                    String uname  = parts.length > 1 ? parts[1] : "?";
-                    String role   = parts.length > 2 ? parts[2] : "";
-                    String status = parts.length > 3 ? parts[3] : "";
-                    String icon   = status.equals("ONLINE") ? "🟢" : "⚫";
-                    membersList.getItems().add(icon + " " + uname + " (" + role + ")");
-                }
-            }
-
-            case "LIST_END" -> inListMode = false;
-
-            case "PENDING" ->
-                    showStatus(parts.length > 1 ? parts[1] : "Messages en attente.", true);
-
-            case "OK" ->
-                    showStatus(parts.length > 1 ? parts[1] : "OK", true);
-
-            case "ERROR" -> {
-                String msg = parts.length > 1 ? parts[1] : "Erreur.";
-                showStatus("❌ " + msg, false);
-                // RG10 : perte de connexion
-                if (msg.contains("connexion perdue")) {
-                    connectedUserLabel.setText("🔴 Hors ligne");
-                }
-                // Activer le bouton LIST si c'est un ORGANISATEUR
-                if (msg.contains("RG13") == false && parts[1].contains("ORGANISATEUR")) {
-                    listMembersBtn.setVisible(true);
-                }
-            }
-
-            // Activer le bouton LIST pour les ORGANISATEURS après login réussi
-            default -> {
-                if (response.contains("ORGANISATEUR")) {
-                    listMembersBtn.setVisible(true);
-                }
-            }
+            // Erreurs et confirmations
+            case "ERROR" -> showStatus("❌ " + (parts.length > 1 ? parts[1] : "Erreur."), false);
+            case "OK"    -> { if (parts.length > 1) showStatus("✅ " + parts[1], true); }
         }
-
-        // Auto-scroll vers le bas
-        scrollToBottom();
     }
 
-    // -------------------------
-    // Affichage d'une bulle de message
-    // -------------------------
+    // ================================================================
+    // Bulles de message
+    // ================================================================
 
-    private void addMessageBubble(String content, boolean isMe) {
-        HBox row = new HBox();
-        row.setPadding(new Insets(4, 12, 4, 12));
-        row.setAlignment(isMe ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
-
-        Label bubble = new Label(content);
-        bubble.getStyleClass().add(isMe ? "bubble-me" : "bubble-other");
+    private void addBubble(String text, boolean isMe) {
+        Label bubble = new Label(text);
         bubble.setWrapText(true);
-        bubble.setMaxWidth(360);
+        bubble.setMaxWidth(400);
+        bubble.getStyleClass().add(isMe ? "bubble-me" : "bubble-other");
 
-        row.getChildren().add(bubble);
+        HBox row = new HBox(bubble);
+        row.setAlignment(isMe ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
+        row.setPadding(new Insets(3, 10, 3, 10));
+
         messagesBox.getChildren().add(row);
+        messagesScrollPane.layout();
+        messagesScrollPane.setVvalue(1.0);
     }
 
-    // -------------------------
-    // Affichage d'un statut
-    // -------------------------
+    // ================================================================
+    // Barre de statut
+    // ================================================================
 
     private void showStatus(String msg, boolean success) {
         statusLabel.setText(msg);
-        statusLabel.setStyle(success
-                ? "-fx-text-fill: #27ae60;"
-                : "-fx-text-fill: #e74c3c;");
-    }
-
-    // -------------------------
-    // Scroll automatique
-    // -------------------------
-
-    private void scrollToBottom() {
-        javafx.application.Platform.runLater(() ->
-                messagesScrollPane.setVvalue(1.0)
+        statusLabel.setStyle(
+                "-fx-text-fill:" + (success ? "#22c55e" : "#ef4444") + ";" +
+                        "-fx-font-size:11px;"
         );
     }
 }

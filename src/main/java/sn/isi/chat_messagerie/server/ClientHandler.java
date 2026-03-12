@@ -100,7 +100,7 @@ public class ClientHandler implements Runnable {
     // =========================================================
 
     private void handleRegister(String[] parts) {
-        if (parts.length < 4) { send("ERROR|Usage : REGISTER|username|password|role"); return; }
+        if (parts.length < 4) { send("ERROR Usage : REGISTER|username|password|role"); return; }
 
         String username = parts[1].trim();
         String password = parts[2];
@@ -120,7 +120,7 @@ public class ClientHandler implements Runnable {
 
         // RG1 : username unique
         if (userDAO.findByUsername(username) != null) {
-            send("ERROR|Ce nom d'utilisateur est déjà pris. (RG1)");
+            send("ERROR|Ce nom d'utilisateur est déjà pris.");
             return;
         }
 
@@ -128,8 +128,8 @@ public class ClientHandler implements Runnable {
         String hashedPassword = PasswordUtil.hash(password);
         userDAO.save(new User(username, hashedPassword, role));
 
-        logger.info("[RG12] Inscription : " + username + " | Rôle : " + role);
-        send("OK|Inscription réussie. Vous pouvez vous connecter.");
+        logger.info("Inscription : " + username + " | Rôle : " + role);
+        send("OK Inscription réussie. Vous pouvez vous connecter.");
     }
 
     // =========================================================
